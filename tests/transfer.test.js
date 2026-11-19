@@ -19,6 +19,28 @@ test("settings keep the API key out of the study file", () => {
   assert.equal(loadStudies(storage)[0].title, "John 3:16 (sample)");
 });
 
+test("reading size and the phone hint dismissal persist, and older settings still load", () => {
+  const storage = memoryStorage();
+  saveSettings({
+    esvApiKey: "",
+    theme: "system",
+    activeStudyId: null,
+    readingSize: "xl",
+    helpDismissed: true,
+  }, storage);
+  const saved = loadSettings(storage);
+  assert.equal(saved.readingSize, "xl");
+  assert.equal(saved.helpDismissed, true);
+  assert.equal(storage.getItem(SETTINGS_KEY).includes("local-key-value"), false);
+  storage.setItem(SETTINGS_KEY, JSON.stringify({ esvApiKey: "kept", theme: "dark" }));
+  const older = loadSettings(storage);
+  assert.equal(older.esvApiKey, "kept");
+  assert.equal(older.readingSize, "m");
+  assert.equal(older.helpDismissed, false);
+  saveSettings({ ...older, readingSize: "nope" }, storage);
+  assert.equal(loadSettings(storage).readingSize, "m");
+});
+
 test("corrupt storage does not throw", () => {
   const storage = memoryStorage();
   storage.setItem(STUDIES_KEY, "{");

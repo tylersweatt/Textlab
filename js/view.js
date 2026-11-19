@@ -122,12 +122,16 @@ function renderWords(prop, index, editing, conjOn, handlers) {
 function renderDiagram(study, state, handlers) {
   const layout = layoutTree(study.nodes);
   const narrow = window.innerWidth < 700;
-  const colW = narrow ? 26 : 46;
+  const colW = narrow ? 40 : 46;
   const gutW = layout.maxCol * colW + 16;
   const editing = state.editing !== false;
   const rows = layout.props.map((prop, index) => el("div", {
-    class: `row${layout.firstOfVerse[index] ? "" : " merge-top"}`,
+    class: `row${layout.firstOfVerse[index] ? "" : " merge-top"}${state.selectedIndex === index ? " is-selected" : ""}`,
     "data-i": String(index),
+    onClick: (event) => {
+      if (event.target.closest("button")) return;
+      handlers.selectRow(index);
+    },
   }, [
     editing && !layout.firstOfVerse[index]
       ? el("button", {
@@ -403,6 +407,13 @@ function renderDialog(state, handlers) {
       el("option", { value: "dark", text: "Dark" }),
     ]);
     theme.value = state.settings.theme || "system";
+    const reading = el("select", { name: "readingSize", "aria-label": "Reading size" }, [
+      el("option", { value: "s", text: "S" }),
+      el("option", { value: "m", text: "M" }),
+      el("option", { value: "l", text: "L" }),
+      el("option", { value: "xl", text: "XL" }),
+    ]);
+    reading.value = state.settings.readingSize || "m";
     body = [
       el("form", {
         class: "grid",
@@ -418,6 +429,7 @@ function renderDialog(state, handlers) {
           el("a", { href: "https://api.esv.org/account/create-application/", target: "_blank", rel: "noopener noreferrer", text: "Create a free ESV API key" }),
         ]),
         field("Appearance", theme),
+        field("Reading size", reading),
         el("button", { type: "submit", class: "pbtn", text: "Save settings" }),
       ]),
       el("button", { type: "button", class: "quiet", text: "Forget the key on this device", onClick: handlers.forgetKey }),
@@ -455,6 +467,27 @@ function renderDialog(state, handlers) {
           ]),
         ])),
       ])),
+    ];
+  } else if (dialog.type === "more") {
+    title = "More";
+    const item = (text, onClick) => el("button", { type: "button", class: "tbtn", text, onClick });
+    body = [
+      el("div", { class: "grid" }, [
+        item("New study", () => handlers.openDialog({ type: "new" })),
+        item("Relationships", () => handlers.openDialog({ type: "guide" })),
+        item(`Studies · ${state.studies.length}`, () => handlers.openDialog({ type: "studies" })),
+        item("Export", () => handlers.openDialog({ type: "file" })),
+        item("Key", () => handlers.openDialog({ type: "settings" })),
+        item(state.resolved === "dark" ? "Theme: dark" : "Theme: light", handlers.toggleTheme),
+      ]),
+    ];
+  } else if (dialog.type === "help") {
+    title = "How to bracket";
+    body = [
+      el("p", { text: "Split: tap a later word. The ✕ on a selected line rejoins it with the line above. A split stays inside one verse." }),
+      el("p", { text: "Bracket: tap one dot, then another. A bracket’s own hollow dot uses that whole span. Esc cancels a pending dot." }),
+      el("p", { text: "Label: tap the bracket or its abbreviation. Search by name or by the conjunction in the text. Flip swaps the arms. Main side moves the head line." }),
+      el("p", { text: "The spacebar hides the handles so you can read the finished diagram." }),
     ];
   } else if (dialog.type === "confirm") {
     title = dialog.title;
@@ -528,6 +561,8 @@ export function renderApp(state, handlers) {
   });
   title.value = state.titleDraft ?? study.title;
   const phrasing = state.view === "phrasing";
+  const narrow = window.innerWidth < 700;
+  const showHint = narrow && editing && !phrasing && state.settings?.helpDismissed !== true;
   return el("div", { class: `app${editing ? " editing" : ""}` }, [
     state.banner ? el("div", { class: "alarm", role: "status" }, [
       state.banner.text,
@@ -556,14 +591,16 @@ export function renderApp(state, handlers) {
         onClick: handlers.toggleConj,
         text: "Conjunctions",
       }),
-      el("button", { type: "button", class: "tbtn", text: window.innerWidth < 700 ? "＋ New" : "＋ New study", onClick: () => handlers.openDialog({ type: "new" }) }),
-      el("button", { type: "button", class: "tbtn", text: "Relationships", onClick: () => handlers.openDialog({ type: "guide" }) }),
-      el("button", { type: "button", class: "tbtn", text: `Studies · ${state.studies.length}`, onClick: () => handlers.openDialog({ type: "studies" }) }),
-      el("button", { type: "button", class: "tbtn", text: "Export", onClick: () => handlers.openDialog({ type: "file" }) }),
-      el("button", { type: "button", class: "tbtn", text: "Key", onClick: () => handlers.openDialog({ type: "settings" }) }),
+      el("button", { type: "button", class: "tbtn wide-only", text: "＋ New study", onClick: () => handlers.openDialog({ type: "new" }) }),
+      el("button", { type: "button", class: "tbtn wide-only", text: "Relationships", onClick: () => handlers.openDialog({ type: "guide" }) }),
+      el("button", { type: "button", class: "tbtn wide-only", text: `Studies · ${state.studies.length}`, onClick: () => handlers.openDialog({ type: "studies" }) }),
+      el("button", { type: "button", class: "tbtn wide-only", text: "Export", onClick: () => handlers.openDialog({ type: "file" }) }),
+      el("button", { type: "button", class: "tbtn wide-only", text: "Key", onClick: () => handlers.openDialog({ type: "settings" }) }),
+      el("button", { type: "button", class: "tbtn phone-only", text: "⋯", "aria-label": "More", onClick: () => handlers.openDialog({ type: "more" }) }),
+      el("button", { type: "button", class: "tbtn phone-only", text: "?", "aria-label": "Help", onClick: handlers.openHelp }),
       el("button", {
         type: "button",
-        class: "tbtn themebtn",
+        class: "tbtn themebtn wide-only",
         title: state.resolved === "dark" ? "Dark" : "Light",
         "aria-label": "Theme",
         text: state.resolved === "dark" ? "☾" : "☀",
@@ -583,9 +620,13 @@ export function renderApp(state, handlers) {
             el("button", { type: "button", class: "layertab", "aria-current": phrasing ? "true" : "false", text: "Phrasing", onClick: () => handlers.setView("phrasing") }),
           ]),
           el("button", { type: "button", class: "sbtn", title: "Keep this one and continue in a copy", text: "Save a copy", onClick: () => handlers.duplicate(study.id) }),
-          el("button", { type: "button", class: "sbtn", text: "Undo", disabled: !state.canUndo, onClick: handlers.undo }),
-          el("button", { type: "button", class: "sbtn", text: "Redo", disabled: !state.canRedo, onClick: handlers.redo }),
+          el("button", { type: "button", class: "sbtn wide-only", text: "Undo", disabled: !state.canUndo, onClick: handlers.undo }),
+          el("button", { type: "button", class: "sbtn wide-only", text: "Redo", disabled: !state.canRedo, onClick: handlers.redo }),
         ]),
+        showHint ? el("div", { class: "hintstrip phone-only", role: "status" }, [
+          el("p", { text: "Tap a later word to split, two dots to bracket, and a label to name it." }),
+          el("button", { type: "button", class: "sbtn", text: "Dismiss", onClick: handlers.dismissHint }),
+        ]) : null,
         state.notice ? el("div", { class: "notice", role: "status" }, [
           state.notice,
           el("button", { type: "button", class: "banner-link", text: "Undo", onClick: handlers.undo }),
@@ -607,6 +648,14 @@ export function renderApp(state, handlers) {
       ]),
     ]),
     renderCopyright(study),
+    narrow ? el("nav", { class: "phonebar", "aria-label": "Bracketing" }, [
+      el("button", { type: "button", text: "Split", onClick: handlers.phoneSplit }),
+      el("button", { type: "button", text: "Bracket", onClick: handlers.phoneBracket }),
+      el("button", { type: "button", text: "Label", onClick: handlers.phoneLabel }),
+      el("button", { type: "button", text: "Undo", disabled: !state.canUndo, onClick: handlers.undo }),
+      el("button", { type: "button", text: "Redo", disabled: !state.canRedo, onClick: handlers.redo }),
+    ]) : null,
+    state.updateReady ? el("button", { type: "button", class: "update-toast", text: "Update available — tap to refresh", onClick: handlers.refreshApp }) : null,
     renderPopover(state, handlers),
     renderDialog(state, handlers),
   ]);
@@ -709,7 +758,7 @@ function drawGutter(state, handlers) {
         x: x + (narrow ? 5 : 9),
         y: y - 6,
         text,
-        style: `fill:${labelColor};font-family:var(--sans);font-size:${narrow ? 11 : 13}px;font-weight:600;cursor:pointer`,
+        style: `fill:${labelColor};font-family:var(--sans);font-size:${narrow ? "0.75rem" : "0.8125rem"};font-weight:600;cursor:pointer`,
         onClick: (event) => {
           event.stopPropagation();
           handlers.openRel(node.group.id, anchor(event));
@@ -755,7 +804,7 @@ function drawGutter(state, handlers) {
         class: "hit",
         cx: x,
         cy,
-        r: narrow ? 12 : 9,
+        r: 22,
         style: "fill:transparent;cursor:pointer",
         onClick: (event) => {
           event.stopPropagation();
@@ -780,7 +829,7 @@ function drawGutter(state, handlers) {
         class: "hit",
         cx: gutW - 6,
         cy: row.mid,
-        r: Math.min(15, (row.bottom - row.top) / 2),
+        r: 22,
         style: "fill:transparent;cursor:pointer",
         onClick: (event) => {
           event.stopPropagation();
