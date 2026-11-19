@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { spawn } from "node:child_process";
 import { propTexts } from "../js/model.js";
 import { sampleStudy } from "../js/sample.js";
 
@@ -81,8 +82,97 @@ function startServer() {
   });
 }
 
+const CHROME_BINS = [
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/local/bin/google-chrome",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+];
+
+/** Session-bus chatter. A missing bus must not decide whether the page rendered. */
+const DBUS_NOISE = /dbus|Failed to connect to the bus|NameHasOwner|object_proxy|bus\.cc/i;
+
+function chromeLaunch(binary, url, profile) {
+  const args = [
+    "--headless=new",
+    "--disable-gpu",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-sync",
+    "--disable-features=MediaRouter,HardwareMediaKeyHandling,GlobalMediaControls",
+    `--user-data-dir=${profile}`,
+    "--virtual-time-budget=4000",
+    "--dump-dom",
+    url,
+  ];
+  // ubuntu-latest (26.04) publishes a session-bus address Chrome cannot parse
+  // ("Unknown address type"). Leaving the variable unset makes libdbus try to
+  // autolaunch a bus and the headless process never reaches --dump-dom; the
+  // test then kills it and the only text left is the bus error. Point both
+  // buses at a socket that refuses immediately so Chrome logs the failure and
+  // continues. NO_AT_BRIDGE stops the accessibility bus from being started,
+  // which otherwise waits out the same timer.
+  const env = {
+    ...process.env,
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/dev/null",
+    DBUS_SYSTEM_BUS_ADDRESS: "unix:path=/dev/null",
+    NO_AT_BRIDGE: "1",
+  };
+  return { command: binary, args, env };
+}
+
+function renderFailure(stderr, code, signal) {
+  const extra = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !DBUS_NOISE.test(line))
+    .slice(-8)
+    .join("\n");
+  const why = signal
+    ? `Chrome was killed (${signal}) before the page rendered.`
+    : `Chrome exited ${code} before the page rendered.`;
+  return extra ? `${why}\n${extra}` : why;
+}
+
+function dumpPage(binary, url) {
+  const profile = mkdtempSync(join(tmpdir(), "textlab-chrome-"));
+  const launch = chromeLaunch(binary, url, profile);
+  return new Promise((resolve, reject) => {
+    const child = spawn(launch.command, launch.args, { env: launch.env });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rmSync(profile, { recursive: true, force: true });
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => finish(error));
+    child.on("close", (code, signal) => {
+      if (stdout.includes("TextLab")) finish(null, stdout);
+      else finish(new Error(renderFailure(stderr, code, signal)));
+    });
+  });
+}
+
 test("the page loads in a browser", async (t) => {
-  const chrome = ["/usr/local/bin/google-chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].find((path) => existsSync(path));
+  const chrome = CHROME_BINS.find((path) => existsSync(path));
   if (!chrome) {
     t.skip("Chrome is not installed");
     return;
@@ -90,33 +180,7 @@ test("the page loads in a browser", async (t) => {
   const server = await startServer();
   const { port } = server.address();
   try {
-    const dump = await new Promise((resolve, reject) => {
-      const child = spawn(chrome, [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        `--user-data-dir=${join(root, ".chrome-smoke")}`,
-        "--virtual-time-budget=4000",
-        "--dump-dom",
-        `http://127.0.0.1:${port}/`,
-      ]);
-      let stdout = "";
-      let stderr = "";
-      const timer = setTimeout(() => child.kill("SIGKILL"), 12000);
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk;
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk;
-      });
-      child.on("error", reject);
-      child.on("close", () => {
-        clearTimeout(timer);
-        if (!stdout.includes("TextLab")) reject(new Error(stderr.slice(-500) || "Chrome did not render TextLab"));
-        else resolve(stdout);
-      });
-    });
+    const dump = await dumpPage(chrome, `http://127.0.0.1:${port}/`);
     assert.match(dump, /TextLab/);
     assert.match(dump, /John 3:16/);
     assert.match(dump, /id="gutter"/);
