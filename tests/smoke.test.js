@@ -33,6 +33,15 @@ test("index.html is an installable app shell", () => {
   assert.ok(existsSync(join(root, "sw.js")));
 });
 
+test("the service worker cache list is versioned and updates on request", () => {
+  const sw = readFileSync(join(root, "sw.js"), "utf8");
+  assert.match(sw, /textlab-v3/);
+  assert.match(sw, /SKIP_WAITING/);
+  for (const asset of ["./index.html", "./css/app.css", "./js/app.js", "./js/view.js", "./js/storage.js", "./manifest.webmanifest"]) {
+    assert.match(sw, new RegExp(asset.replace(".", "\\.")));
+  }
+});
+
 test("the service worker caches every module the app imports", () => {
   const sw = readFileSync(join(root, "sw.js"), "utf8");
   const pending = ["js/app.js"];

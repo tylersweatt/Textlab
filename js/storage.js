@@ -1,8 +1,14 @@
 export const STUDIES_KEY = "textlab.studies.v1";
 export const SETTINGS_KEY = "textlab.settings.v1";
 
+const READING_SIZES = new Set(["s", "m", "l", "xl"]);
+
+export function readingSizeOf(value) {
+  return READING_SIZES.has(value) ? value : "m";
+}
+
 export function defaultSettings() {
-  return { esvApiKey: "", theme: "system", activeStudyId: null };
+  return { esvApiKey: "", theme: "system", activeStudyId: null, readingSize: "m", helpDismissed: false };
 }
 
 export function loadSettings(storage) {
@@ -15,6 +21,8 @@ export function loadSettings(storage) {
       esvApiKey: typeof parsed.esvApiKey === "string" ? parsed.esvApiKey : "",
       theme,
       activeStudyId: typeof parsed.activeStudyId === "string" ? parsed.activeStudyId : null,
+      readingSize: readingSizeOf(parsed.readingSize),
+      helpDismissed: parsed.helpDismissed === true,
     };
   } catch {
     return defaultSettings();
@@ -28,6 +36,8 @@ export function saveSettings(settings, storage) {
       esvApiKey: typeof settings.esvApiKey === "string" ? settings.esvApiKey : "",
       theme: settings.theme || "system",
       activeStudyId: settings.activeStudyId || null,
+      readingSize: readingSizeOf(settings.readingSize),
+      helpDismissed: settings.helpDismissed === true,
     }),
   );
 }

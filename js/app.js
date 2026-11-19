@@ -1,6 +1,7 @@
 import {
   deleteBracket as removeBracket,
   drawBracket,
+  flatten,
   flipBracket,
   rejoinProposition,
   setBracketNote,
@@ -33,7 +34,7 @@ import {
   splitLine,
 } from "./phrasing.js";
 import { sampleStudy } from "./sample.js";
-import { loadSettings, loadStudies, memoryStorage, saveSettings, saveStudies } from "./storage.js";
+import { loadSettings, loadStudies, memoryStorage, readingSizeOf, saveSettings, saveStudies } from "./storage.js";
 import { exportLibraryFile, exportStudyFile, planImport, readTransfer, validateStudy } from "./transfer.js";
 import { charIndexOfWord } from "./words.js";
 import { paintGutter, renderApp } from "./view.js";
@@ -77,6 +78,10 @@ const state = {
   loadRef: "",
   titleDraft: null,
   focusPop: false,
+  selectedIndex: null,
+  updateReady: false,
+  waitingWorker: null,
+  refreshing: false,
 };
 
 let focusDialog = false;
@@ -106,7 +111,9 @@ function resolveTheme(setting) {
 function applyTheme() {
   state.resolved = resolveTheme(state.settings.theme);
   document.documentElement.dataset.theme = state.resolved;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", state.resolved === "dark" ? "#13161b" : "#f5f5f2");
+  document.documentElement.dataset.reading = readingSizeOf(state.settings.readingSize);
+  const header = state.resolved === "dark" ? "#1a1e24" : "#ffffff";
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute("content", header));
 }
 
 function banner(text) {
@@ -534,9 +541,52 @@ const handlers = {
     const theme = form.get("theme");
     state.settings.esvApiKey = String(form.get("esvApiKey") || "").trim();
     state.settings.theme = theme === "light" || theme === "dark" || theme === "system" ? theme : "system";
+    state.settings.readingSize = readingSizeOf(form.get("readingSize"));
     saveSettings(state.settings, storage);
     state.dialog = null;
     banner(state.settings.esvApiKey ? "Settings saved on this device." : "Settings saved. Paste still works without a key.");
+  },
+  selectRow(index) {
+    state.selectedIndex = index;
+    render();
+  },
+  dismissHint() {
+    state.settings.helpDismissed = true;
+    saveSettings(state.settings, storage);
+    render();
+  },
+  openHelp() {
+    openDialog({ type: "help" });
+  },
+  phoneSplit() {
+    state.editing = true;
+    if (state.selectedIndex == null) state.selectedIndex = 0;
+    state.banner = { text: "Tap a later word on the selected line to split it." };
+    render();
+    document.querySelector(".row.is-selected")?.scrollIntoView({ block: "nearest" });
+  },
+  phoneBracket() {
+    state.editing = true;
+    state.banner = { text: "Tap a dot, then a second dot. A bracket’s own dot uses that whole span." };
+    render();
+  },
+  phoneLabel() {
+    const index = state.selectedIndex ?? 0;
+    const { brackets } = flatten(current());
+    const hits = brackets.filter((bracket) => bracket.start <= index && index <= bracket.end);
+    hits.sort((a, b) => (a.end - a.start) - (b.end - b.start));
+    const target = hits[0];
+    if (!target) {
+      banner("Draw a bracket first, then tap Label.");
+      return;
+    }
+    state.selectedIndex = index;
+    handlers.openRel(target.id, { x: 12, y: Math.min(120, window.innerHeight * 0.2) });
+  },
+  refreshApp() {
+    if (!state.waitingWorker) return;
+    state.refreshing = true;
+    state.waitingWorker.postMessage({ type: "SKIP_WAITING" });
   },
   forgetKey() {
     state.settings.esvApiKey = "";
@@ -785,7 +835,22 @@ function boot() {
     if (state.settings.theme === "system") render();
   });
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").then((registration) => {
+      const announce = () => {
+        if (registration.waiting && navigator.serviceWorker.controller) {
+          state.waitingWorker = registration.waiting;
+          state.updateReady = true;
+          render();
+        }
+      };
+      registration.addEventListener("updatefound", () => {
+        registration.installing?.addEventListener("statechange", announce);
+      });
+      announce();
+    }).catch(() => {});
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (state.refreshing) window.location.reload();
+    });
   }
   render();
 }
