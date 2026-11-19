@@ -15,9 +15,11 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# ubuntu-latest is 26.04, where headless Chrome does not finish --dump-dom.
+# Pin 24.04 for every job so pull-request CI and the Pages deploy use the same runner.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,8 +27,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run tests
-        run: node --test
+      - name: Unit tests
+        run: node --test --test-skip-pattern "^the page loads in a browser$"
+
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Visible, and not a deploy dependency. A browser that cannot start
+      # must not block Pages. The grep rejects a skip: the step passes only
+      # when Chrome actually rendered the sample page.
+      - name: Browser smoke
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node --test --test-name-pattern "^the page loads in a browser$" | tee browser.tap
+          grep -E "^ok [0-9]+ - the page loads in a browser$" browser.tap
 
   deploy:
     needs: test
@@ -34,7 +55,7 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
