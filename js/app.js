@@ -1,26 +1,27 @@
+import {
+  deleteBracket as removeBracket,
+  drawBracket,
+  flipBracket,
+  rejoinProposition,
+  setBracketNote,
+  setBracketRelation,
+  splitProposition,
+  toggleMainSide,
+} from "./brackets.js";
 import { renderPhrasingSvg, renderSvg, toOutline } from "./diagram.js";
 import { fetchEsvPassage } from "./esv.js";
-import { canRedo, canUndo, checkpoint, commit, createHistory, redo, replacePresent, undo } from "./history.js";
+import { canRedo, canUndo, commit, createHistory, redo, undo } from "./history.js";
 import {
   ESV_VERSE_LIMIT,
-  bracketSiblings,
   clearBrackets,
   createStudy,
-  deleteAt,
   esvVerseCount,
   getNode,
   libraryVerseCount,
-  mergePropWithNext,
   selectionStillValid,
-  setDominant,
   setNodeNote,
-  setPropText,
-  setRelation,
-  setStudyNote,
   setTitle,
-  splitProp,
   uid,
-  unbracket,
 } from "./model.js";
 import { MAX_PROPOSITIONS, nodesFromVerses, versesFromPlainText } from "./passage.js";
 import {
@@ -29,13 +30,13 @@ import {
   mergeLineWithNext,
   rebuildPhrasing,
   setIndent,
-  setLineNote,
   splitLine,
 } from "./phrasing.js";
 import { sampleStudy } from "./sample.js";
 import { loadSettings, loadStudies, memoryStorage, saveSettings, saveStudies } from "./storage.js";
 import { exportLibraryFile, exportStudyFile, planImport, readTransfer, validateStudy } from "./transfer.js";
-import { renderApp } from "./view.js";
+import { charIndexOfWord } from "./words.js";
+import { paintGutter, renderApp } from "./view.js";
 
 const storage = browserStorage();
 const memoryOnly = storage.isMemory === true;
@@ -67,6 +68,15 @@ const state = {
   resolved: "light",
   canUndo: false,
   canRedo: false,
+  editing: true,
+  conj: true,
+  pending: null,
+  pop: null,
+  relQuery: "",
+  notice: "",
+  loadRef: "",
+  titleDraft: null,
+  focusPop: false,
 };
 
 let focusDialog = false;
@@ -88,16 +98,6 @@ function current() {
   return state.history.present;
 }
 
-function noteAt(study, target) {
-  if (target.kind === "study") return study.note || "";
-  if (target.kind === "line") return study.phrasing?.lines?.[target.index]?.note || "";
-  try {
-    return getNode(study, target.path)?.note || "";
-  } catch {
-    return null;
-  }
-}
-
 function resolveTheme(setting) {
   if (setting === "light" || setting === "dark") return setting;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -106,7 +106,7 @@ function resolveTheme(setting) {
 function applyTheme() {
   state.resolved = resolveTheme(state.settings.theme);
   document.documentElement.dataset.theme = state.resolved;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", state.resolved === "dark" ? "#141210" : "#1f4d3a");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", state.resolved === "dark" ? "#13161b" : "#f5f5f2");
 }
 
 function banner(text) {
@@ -167,6 +167,18 @@ function render() {
   if (focusDialog === false && state.dialog && form && !activeId) {
     form.querySelector("input, textarea")?.focus();
   }
+  if (state.pop?.kind === "rel" && (state.focusPop || activeId === "rel-search")) {
+    const search = document.getElementById("rel-search");
+    if (search) {
+      search.focus();
+      const end = search.value.length;
+      search.setSelectionRange(end, end);
+    }
+  } else if (state.pop?.kind === "note" && state.focusPop) {
+    document.getElementById("pop-note")?.focus();
+  }
+  state.focusPop = false;
+  paintGutter(state, handlers);
 }
 
 function dispatch(mutator, after) {
@@ -181,11 +193,6 @@ function dispatch(mutator, after) {
   } catch (error) {
     banner(error.message || "That could not be done.");
   }
-}
-
-function singlePath() {
-  if (!state.selection || state.selection.start !== state.selection.end) return null;
-  return state.selection.parentPath.concat(state.selection.start);
 }
 
 function openDialog(dialog) {
@@ -269,167 +276,159 @@ async function buildFromDraft(draft, replacing) {
   });
 }
 
+function pathOf(study, id) {
+  let found = null;
+  const walk = (nodes, path) => {
+    nodes.forEach((node, index) => {
+      const next = path.concat(index);
+      if (node.id === id) found = next;
+      else if (node.type === "group") walk(node.children || [], next);
+    });
+  };
+  walk(study.nodes || [], []);
+  return found;
+}
+
 const handlers = {
-  select(parentPath, index, shift) {
-    const parent = parentPath.slice();
-    const currentSelection = state.selection;
-    const same = currentSelection && currentSelection.parentPath.join(",") === parent.join(",");
-    if (shift && same) {
-      state.selection = { parentPath: parent, start: Math.min(currentSelection.start, index), end: Math.max(currentSelection.end, index) };
-    } else if (same && index >= currentSelection.start && index <= currentSelection.end && currentSelection.end > currentSelection.start) {
-      state.selection = { parentPath: parent, start: index, end: index };
-    } else if (same && (index === currentSelection.start - 1 || index === currentSelection.end + 1)) {
-      state.selection = { parentPath: parent, start: Math.min(currentSelection.start, index), end: Math.max(currentSelection.end, index) };
-    } else {
-      state.selection = { parentPath: parent, start: index, end: index };
-    }
+  toggleEditing() {
+    state.editing = state.editing === false;
     render();
   },
-  selectOnly(parentPath, index) {
-    state.selection = { parentPath: parentPath.slice(), start: index, end: index };
+  toggleConj() {
+    state.conj = state.conj === false;
     render();
   },
-  focusGroup(path) {
-    handlers.selectOnly(path.slice(0, -1), path.at(-1));
-    state.sheet = true;
-    render();
-  },
-  openSheet() {
-    state.sheet = true;
-    render();
-  },
-  closeSheet() {
-    state.sheet = false;
-    render();
-  },
-  bracket() {
-    const selection = state.selection;
-    if (!selection || selection.end <= selection.start) {
-      banner("Select two or more adjacent lines, then bracket them.");
+  async loadReference() {
+    const ref = (document.getElementById("ref-input")?.value || state.loadRef || "").trim();
+    state.loadRef = ref;
+    if (!ref) {
+      banner("Type a reference first.");
       return;
     }
-    const parentPath = selection.parentPath.slice();
-    const start = selection.start;
-    dispatch(
-      (study) => bracketSiblings(study, parentPath, start, selection.end - start + 1),
-      () => {
-        state.selection = { parentPath, start, end: start };
-        state.sheet = true;
-      },
-    );
+    if (!state.settings.esvApiKey) {
+      state.draft = { mode: "paste", reference: ref, title: ref, clauses: "yes", translationName: "Pasted" };
+      openDialog({ type: "new" });
+      return;
+    }
+    state.busy = true;
+    render();
+    try {
+      const built = await buildFromDraft({ mode: "esv", reference: ref, title: "", clauses: "yes" }, false);
+      state.studies.push(built);
+      state.history = createHistory(built);
+      state.dialog = null;
+      state.busy = false;
+      state.pending = null;
+      state.pop = null;
+      state.view = "brackets";
+      state.loadRef = "";
+      persist();
+      render();
+    } catch (error) {
+      state.busy = false;
+      banner(error.message || "That passage could not be loaded.");
+    }
   },
-  unbracket() {
-    const path = singlePath();
-    if (!path) return;
-    const parentPath = path.slice(0, -1);
-    const index = path.at(-1);
-    dispatch(
-      (study) => unbracket(study, path),
-      () => {
-        state.selection = { parentPath, start: index, end: index };
-      },
-    );
+  splitWord(index, wordIndex) {
+    state.pending = null;
+    state.pop = null;
+    dispatch((study) => splitProposition(study, index, wordIndex));
   },
-  splitAt(path, charIndex) {
-    const parentPath = path.slice(0, -1);
-    const index = path.at(-1);
-    dispatch(
-      (study) => splitProp(study, path, charIndex),
-      () => {
-        state.selection = { parentPath, start: index, end: index + 1 };
-      },
-    );
+  rejoin(index) {
+    state.pending = null;
+    dispatch((study) => rejoinProposition(study, index));
   },
-  merge() {
-    const path = singlePath();
-    if (!path) return;
-    const parentPath = path.slice(0, -1);
-    const index = path.at(-1);
-    dispatch(
-      (study) => mergePropWithNext(study, path),
-      () => {
-        state.selection = { parentPath, start: index, end: index };
-      },
-    );
-  },
-  deleteSelection() {
-    const path = singlePath();
-    if (!path) return;
-    dispatch((study) => deleteAt(study, path), () => {
-      state.selection = null;
-    });
-  },
-  setRelation(path, relationId) {
-    dispatch((study) => setRelation(study, path, relationId));
-  },
-  setDominant(path, dominant) {
-    dispatch((study) => setDominant(study, path, dominant));
-  },
-  selectParent() {
-    const path = singlePath();
-    if (!path?.length) return;
-    if (path.length === 1) {
-      state.sheet = true;
+  connect(sel) {
+    const pending = state.pending;
+    if (!pending) {
+      state.pending = sel;
+      state.banner = null;
       render();
       return;
     }
-    const parent = path.slice(0, -1);
-    handlers.selectOnly(parent.slice(0, -1), parent.at(-1));
-    state.sheet = true;
-    render();
-  },
-  openNote(target) {
-    state.noteEditor = {
-      ...target,
-      path: target.path ? target.path.slice() : undefined,
-    };
-    state.focusNote = true;
-    render();
-  },
-  noteInput(target, value) {
-    const text = String(value ?? "");
-    const existing = noteAt(current(), target);
-    if (existing == null || existing === text) return;
-    if (!state.noteSession) {
-      state.history = checkpoint(state.history);
-      state.noteSession = true;
+    if (pending.start === sel.start && pending.end === sel.end) {
+      state.pending = null;
+      render();
+      return;
     }
-    let next = current();
-    if (target.kind === "study") next = setStudyNote(next, text);
-    else if (target.kind === "line") next = setLineNote(next, target.index, text);
-    else next = setNodeNote(next, target.path, text);
-    state.history = replacePresent(state.history, next);
-    persist();
-  },
-  noteBlur() {
-    state.noteSession = false;
-    state.noteEditor = null;
-    setTimeout(() => render(), 0);
-  },
-  beginTextEdit() {
-    state.textSession = false;
-  },
-  editProp(path, value) {
+    const start = Math.min(pending.start, sel.start);
+    const end = Math.max(pending.end, sel.end);
+    state.pending = null;
     try {
-      if (!state.textSession) {
-        state.history = checkpoint(state.history);
-        state.textSession = true;
-      }
-      state.history = replacePresent(state.history, setPropText(current(), path, value));
+      const result = drawBracket(current(), start, end);
+      state.history = commit(state.history, result.study);
+      state.notice = result.notice;
+      state.banner = null;
+      state.pop = null;
       persist();
+      render();
     } catch (error) {
-      banner(error.message);
+      state.notice = "";
+      banner(error.message || "That bracket could not be drawn.");
     }
   },
-  endTextEdit() {
-    state.textSession = false;
-    setTimeout(() => render(), 0);
+  openRel(id, pos) {
+    state.relQuery = "";
+    state.focusPop = true;
+    state.pop = { kind: "rel", id, x: pos.x, y: pos.y };
+    render();
+  },
+  openPropNote(id, pos) {
+    const path = pathOf(current(), id);
+    const note = path ? getNode(current(), path)?.note || "" : "";
+    state.focusPop = true;
+    state.pop = { kind: "note", target: "prop", id, draft: note, x: pos.x, y: pos.y };
+    render();
+  },
+  openBracketNote(id, pos) {
+    const path = pathOf(current(), id);
+    const note = path ? getNode(current(), path)?.note || "" : "";
+    state.focusPop = true;
+    state.pop = { kind: "note", target: "bracket", id, draft: note, x: pos.x, y: pos.y };
+    render();
+  },
+  saveNote(text) {
+    const pop = state.pop;
+    if (!pop) return;
+    const value = String(text ?? "").trim();
+    state.pop = null;
+    if (pop.target === "bracket") dispatch((study) => setBracketNote(study, pop.id, value));
+    else {
+      const path = pathOf(current(), pop.id);
+      if (!path) return;
+      dispatch((study) => setNodeNote(study, path, value));
+    }
+  },
+  closePop() {
+    state.pop = null;
+    state.relQuery = "";
+    render();
+  },
+  relQuery(value) {
+    state.relQuery = value;
+    state.focusPop = true;
+    render();
+  },
+  pickRelation(id, relationId) {
+    dispatch((study) => setBracketRelation(study, id, relationId));
+  },
+  flip(id) {
+    dispatch((study) => flipBracket(study, id));
+  },
+  mainSide(id) {
+    dispatch((study) => toggleMainSide(study, id));
+  },
+  deleteBracket(id) {
+    state.pop = null;
+    dispatch((study) => removeBracket(study, id));
   },
   setIndent(index, indent) {
     dispatch((study) => setIndent(study, index, indent));
   },
-  splitLine(index, charIndex) {
-    dispatch((study) => splitLine(study, index, charIndex));
+  splitLine(index, wordIndex) {
+    const line = current().phrasing?.lines?.[index];
+    if (!line) return;
+    dispatch((study) => splitLine(study, index, charIndexOfWord(line.text, wordIndex)));
   },
   mergeLine(index) {
     dispatch((study) => mergeLineWithNext(study, index));
@@ -459,6 +458,9 @@ const handlers = {
     state.history = undo(state.history);
     if (!selectionStillValid(current(), state.selection)) state.selection = null;
     state.noteEditor = null;
+    state.notice = "";
+    state.pending = null;
+    state.pop = null;
     persist();
     render();
   },
@@ -467,12 +469,17 @@ const handlers = {
     state.history = redo(state.history);
     if (!selectionStillValid(current(), state.selection)) state.selection = null;
     state.noteEditor = null;
+    state.notice = "";
+    state.pending = null;
+    state.pop = null;
     persist();
     render();
   },
   setView(view) {
     state.view = view;
     state.sheet = false;
+    state.pending = null;
+    state.pop = null;
     render();
   },
   toggleTheme() {
@@ -564,8 +571,12 @@ const handlers = {
       return;
     }
     state.studies.push(plan.accepted[0]);
-    saveStudies(state.studies, storage);
-    banner("Study copied on this device.");
+    state.history = createHistory(structuredClone(plan.accepted[0]));
+    state.dialog = null;
+    state.pending = null;
+    state.pop = null;
+    persist();
+    render();
   },
   deleteStudy(id) {
     const found = state.studies.find((study) => study.id === id);
@@ -658,6 +669,7 @@ const handlers = {
   },
   rename(value) {
     state.renaming = false;
+    state.titleDraft = null;
     if (value.trim() === current().title || (!value.trim() && current().title === "Untitled study")) {
       render();
       return;
@@ -710,16 +722,46 @@ function boot() {
   if (!loaded.length) saveStudies(state.studies, storage);
   const active = state.studies.find((study) => study.id === state.settings.activeStudyId) || state.studies[0];
   state.history = createHistory(structuredClone(active));
+  document.addEventListener("click", () => {
+    if (!state.pop) return;
+    state.pop = null;
+    state.relQuery = "";
+    render();
+  });
+  window.addEventListener("resize", () => {
+    const narrow = window.innerWidth < 700;
+    if (narrow !== state.wasNarrow) {
+      state.wasNarrow = narrow;
+      render();
+    } else {
+      paintGutter(state, handlers);
+    }
+  });
+  state.wasNarrow = window.innerWidth < 700;
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      if (state.pop) {
+        handlers.closePop();
+        return;
+      }
+      if (state.pending) {
+        state.pending = null;
+        state.banner = null;
+        render();
+        return;
+      }
       if (state.dialog) {
         handlers.closeDialog();
         return;
       }
-      if (state.sheet) handlers.closeSheet();
       return;
     }
     const typing = event.target instanceof HTMLElement && event.target.closest("input, textarea, select");
+    if (!typing && event.key === " " && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      handlers.toggleEditing();
+      return;
+    }
     if (typing) return;
     const meta = event.metaKey || event.ctrlKey;
     if (meta && event.key.toLowerCase() === "z") {

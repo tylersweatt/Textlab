@@ -119,9 +119,13 @@ test("the page loads in a browser", async (t) => {
     });
     assert.match(dump, /TextLab/);
     assert.match(dump, /John 3:16/);
-    assert.match(dump, /Ac\/Res/);
+    assert.match(dump, /id="gutter"/);
+    assert.match(dump, />Ac</);
+    assert.match(dump, />Res</);
+    assert.match(dump, />16a</);
     assert.match(dump, /begotten/);
     assert.match(dump, /whosoever/);
+    assert.match(dump, /cj-dist/);
   } finally {
     server.close();
   }

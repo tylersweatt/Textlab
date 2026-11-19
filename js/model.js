@@ -1,4 +1,4 @@
-import { dominantFromDefault, getRelationship } from "./relationships.js";
+import { getRelationship } from "./relationships.js";
 import { scriptureWords } from "./words.js";
 
 export class ModelError extends Error {
@@ -156,7 +156,9 @@ export function bracketSiblings(study, parentPath, start, count) {
         type: "group",
         id: uid(),
         relation: null,
-        dominant: "equal",
+        dominant: 0,
+        flip: false,
+        main: null,
         note: "",
         children: kids.slice(start, start + count),
       };
@@ -181,11 +183,17 @@ export function unbracket(study, path) {
 
 export function setRelation(study, path, relationId) {
   const relation = getRelationship(relationId);
-  if (!relation) throw new ModelError("relation", "Choose one of the eighteen relationships.");
+  if (!relation) throw new ModelError("relation", "Choose a relationship from the list.");
   const node = getNode(study, path);
   if (!node || node.type !== "group") throw new ModelError("not-group", "Relationships sit on brackets.");
-  const dominant = dominantFromDefault(relation.defaultDominant, node.children.length);
-  return updateNode(study, path, (group) => ({ ...group, relation: relation.id, dominant }));
+  if (node.relation === relation.id) {
+    return updateNode(study, path, (group) => ({ ...group, relation: null, dominant: 0, main: null }));
+  }
+  let side = relation.main;
+  if (node.flip && side !== "mid") side = side === "top" ? "bottom" : "top";
+  const count = node.children.length;
+  const dominant = side === "top" ? 0 : side === "bottom" ? Math.max(0, count - 1) : "equal";
+  return updateNode(study, path, (group) => ({ ...group, relation: relation.id, dominant, main: null, flip: !!group.flip }));
 }
 
 export function setDominant(study, path, dominant) {
@@ -198,7 +206,8 @@ export function setDominant(study, path, dominant) {
       throw new ModelError("dominant", "That main-point choice does not fit this bracket.");
     }
   }
-  return updateNode(study, path, (group) => ({ ...group, dominant: value }));
+  const main = value === "equal" ? "mid" : value === 0 ? "top" : value === node.children.length - 1 ? "bottom" : "mid";
+  return updateNode(study, path, (group) => ({ ...group, dominant: value, main }));
 }
 
 export function setNodeNote(study, path, note) {
@@ -254,12 +263,15 @@ export function splitProp(study, path, charIndex) {
 export function mergePropWithNext(study, path) {
   const parentPath = path.slice(0, -1);
   const index = path[path.length - 1];
-  return finish(
+  const mergedStudy = finish(
     withChildren(study, parentPath, (kids) => {
       const current = kids[index];
       const next = kids[index + 1];
       if (!current || current.type !== "prop" || !next || next.type !== "prop") {
         throw new ModelError("range", "The next line has to be a proposition, not a bracket. Remove that bracket first.");
+      }
+      if (!sameVerseProps(current, next)) {
+        throw new ModelError("verse", "A proposition cannot cross a verse boundary. Split and rejoin stay inside one verse.");
       }
       const merged = {
         ...current,
@@ -271,6 +283,20 @@ export function mergePropWithNext(study, path) {
       return [...kids.slice(0, index), merged, ...kids.slice(index + 2)];
     }),
   );
+  return { ...mergedStudy, nodes: normalizeGroups(mergedStudy.nodes) };
+}
+
+function versePropKey(prop) {
+  if (prop?.verseRef) return `ref:${prop.verseRef}`;
+  if (prop?.verse) return `v:${prop.verse}`;
+  return null;
+}
+
+function sameVerseProps(a, b) {
+  const left = versePropKey(a);
+  const right = versePropKey(b);
+  if (!left && !right) return true;
+  return left != null && left === right;
 }
 
 function normalizeGroups(nodes) {
