@@ -20,7 +20,7 @@ The first visit needs a network connection so the phone or computer can store th
 
 1. Open [Create an ESV API application](https://api.esv.org/account/create-application/) and sign in with a free Crossway account.
 2. Create an application and copy the key it gives you.
-3. In TextLab, open **Settings**, paste the key, and tap **Save settings**.
+3. In TextLab, open **Key**, paste the key, and tap **Save settings**.
 
 The key is saved only in that browser. It is sent to `api.esv.org` when you look up a passage. It is not stored in this repository, and an exported study does not contain it. Enter the key once on the phone and once on the Mac.
 
@@ -46,7 +46,7 @@ You can ignore the key completely. Choose **Paste text** when you create a study
 
 ## Move studies between phone and Mac
 
-1. Open the study and tap **File**.
+1. Open the study and tap **Export**.
 2. Tap **Export this study**. To move every study, tap **Export all studies**.
 3. On iPhone, the share sheet opens. Tap **AirDrop** and choose the Mac, or tap **Save to Files** and choose a folder in iCloud Drive.
 4. On the other device, open TextLab, tap **Studies** or **File**, then **Import**, and choose that JSON file.
@@ -57,14 +57,13 @@ The API key does not travel inside the file. Add it in Settings on each device w
 
 ## Studying a passage
 
-1. Tap **Studies**, then **New study**. Look up a reference, or paste the text. **Divide into clauses** splits at conjunctions such as for, but, because, and so that.
-2. Tap any later word in a line to start a new proposition there. **Merge with next** joins it back. On a pasted study you can also edit the wording. An ESV study keeps the wording Crossway sent. Put your own words in notes.
-3. Tap the circle beside a line, then the circle beside the next adjacent line. Tap **Bracket**.
-4. Choose one of the eighteen relationships used in Biblearc bracketing. Series, Progression, and Alternative are coordinate, so they start out marked equal. The others support a main point.
-5. Mark **Main is first**, **Main is last**, or **Both equal**. You can change that whenever you want.
-6. Keep bracketing groups the same way until one bracket covers the passage. Notes sit on propositions and on brackets.
-7. **Phrasing** is a separate view. Indent a line under the line it supports. There are no arrows.
-8. **File**, then **Print or save as PDF**, for a page you can take into the pulpit. On a Mac, the print dialog can save a PDF. On iPhone, use the share button in the print preview and choose Save to Files. **Download diagram** saves an SVG image. **Copy outline** puts an indented text outline on the clipboard.
+1. Type a reference and tap **Load**, or tap **New study** and paste the text. **Divide into clauses** splits at conjunctions such as for, but, because, and so that.
+2. With **Editing** on (the spacebar toggles it), tap a later word to split a proposition. The ✕ above a split line rejoins it. A split stays inside one verse, which is then lettered `16a`, `16b`. An ESV study keeps the wording Crossway sent. Put your own words in notes.
+3. Tap the dot beside one proposition, then the dot beside another. Order does not matter. Tap a bracket’s own hollow dot to use that whole span as an end. If the new bracket crosses one you already drew, the older one stretches so the new one can nest, and **Undo** puts the stretch back.
+4. Tap a bracket or its label. Search the eighteen relationships, or the four extended ones (marked ·), by name, abbreviation, or conjunction. **Flip** swaps which half is which. **Main side** moves the head line to the other arm.
+5. An unlabeled bracket stays grey. Coordinate relationships are green, restatement blue, distinct statement red, and contrary statement orange. **Conjunctions** tints the connecting word at the head of a line by that same family.
+6. **Phrasing** is a separate view. Indent a line under the line it supports. There are no arrows.
+7. **Export**, then **Print or save as PDF**, for a page you can take into the pulpit. On a Mac, the print dialog can save a PDF. On iPhone, use the share button in the print preview and choose Save to Files. **Download diagram** saves an SVG image. **Copy outline** puts an indented text outline on the clipboard.
 
 **Undo** and **Redo** apply to the work in this visit. The study itself is saved on the device as you go.
 
@@ -78,4 +77,4 @@ From the project folder:
 node --test
 ```
 
-The tests cover bracketing, dominant and equal marking, undo, clause splitting, the ESV request and the documented passage response, the 500-verse limit, and import and export. A browser check confirms the page renders when Chrome is installed.
+The tests cover bracketing, split and rejoin, drawing, auto-stretch, flip, main side, verse boundaries, migration of older studies, undo, clause splitting, the ESV request and the documented passage response, the 500-verse limit, and import and export. A browser check confirms the page renders when Chrome is installed.

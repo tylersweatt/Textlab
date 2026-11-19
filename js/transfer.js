@@ -42,11 +42,14 @@ function validateNode(node) {
     if (dominant !== "equal" && (!Number.isInteger(dominant) || dominant < 0 || dominant >= children.length)) {
       dominant = "equal";
     }
+    const main = node.main === "top" || node.main === "bottom" || node.main === "mid" ? node.main : null;
     return {
       type: "group",
       id: typeof node.id === "string" && node.id ? node.id : uid(),
       relation,
       dominant,
+      flip: node.flip === true,
+      main,
       note: typeof node.note === "string" ? node.note : "",
       children,
     };

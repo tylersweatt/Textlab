@@ -76,12 +76,15 @@ test("outline and SVG include the relationship and escape markup", () => {
   const study = sampleStudy();
   study.nodes[0].children[0].text = "God <loved> & gave";
   const outline = toOutline(study);
-  assert.match(outline, /Action-Result \(main above\)/);
+  assert.match(outline, /Action-Result \(main below\)/);
   assert.match(outline, /Negative-Positive \(main below\)/);
   const svg = renderSvg(study);
   assert.match(svg, /^<svg/);
   assert.match(svg, /<\/svg>$/);
-  assert.match(svg, /Ac\/Res/);
+  assert.match(svg, />Ac</);
+  assert.match(svg, />Res</);
+  assert.match(svg, />Pur</);
   assert.match(svg, /God &lt;loved&gt; &amp; gave/);
   assert.equal(svg.includes("<loved>"), false);
+  assert.equal(svg.includes("Crossway"), false);
 });

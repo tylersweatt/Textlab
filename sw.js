@@ -1,4 +1,4 @@
-const CACHE = "textlab-v1";
+const CACHE = "textlab-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const ASSETS = [
   "./js/relationships.js",
   "./js/words.js",
   "./js/model.js",
+  "./js/brackets.js",
   "./js/history.js",
   "./js/passage.js",
   "./js/esv.js",

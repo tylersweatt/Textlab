@@ -53,13 +53,23 @@ function esvStudy(text = "Alpha bravo charlie delta") {
   });
 }
 
-test("eighteen Biblearc relationships are unique and categorized", () => {
-  assert.equal(RELATIONSHIPS.length, 18);
-  assert.equal(new Set(RELATIONSHIPS.map((item) => item.id)).size, 18);
-  assert.equal(new Set(RELATIONSHIPS.map((item) => item.abbr)).size, 18);
+test("eighteen Biblearc relationships, plus four extended, are unique and categorized", () => {
+  const core = RELATIONSHIPS.filter((item) => !item.extended);
+  const extended = RELATIONSHIPS.filter((item) => item.extended);
+  assert.equal(core.length, 18);
+  assert.equal(extended.length, 4);
+  assert.deepEqual(extended.map((item) => item.id), [
+    "both-and",
+    "general-specific",
+    "fact-interpretation",
+    "anticipation-fulfillment",
+  ]);
+  assert.equal(new Set(RELATIONSHIPS.map((item) => item.id)).size, 22);
+  assert.equal(new Set(RELATIONSHIPS.map((item) => item.abbr)).size, 22);
   for (const item of RELATIONSHIPS) {
     assert.ok(item.definition.length > 20);
     assert.ok(["coordinate", "restatement", "distinct", "contrary"].includes(item.category));
+    assert.equal(item.extended, extended.includes(item));
   }
 });
 
@@ -67,7 +77,7 @@ test("brackets nest, label, mark a main point, and mark both equal", () => {
   let study = flatStudy(["God loved", "he gave", "whoever believes"]);
   study = bracketSiblings(study, [], 1, 2);
   study = setRelation(study, [1], "action-purpose");
-  assert.equal(getNode(study, [1]).dominant, 0);
+  assert.equal(getNode(study, [1]).dominant, 1);
   study = setDominant(study, [1], "equal");
   assert.equal(getNode(study, [1]).dominant, "equal");
   study = setDominant(study, [1], 1);
@@ -87,7 +97,7 @@ test("rejects a short bracket, a bad range, and an unknown relationship", () => 
   assert.throws(() => bracketSiblings(study, [], 0, 1), /at least two/);
   assert.throws(() => bracketSiblings(study, [], 1, 2), /adjacent/);
   const grouped = bracketSiblings(study, [], 0, 2);
-  assert.throws(() => setRelation(grouped, [0], "not-a-real-relation"), /eighteen/);
+  assert.throws(() => setRelation(grouped, [0], "not-a-real-relation"), /relationship/);
   assert.throws(() => setDominant(grouped, [0], 4), /main-point/);
   assert.throws(() => unbracket(grouped, [0, 0]), /bracket/);
 });
@@ -139,9 +149,10 @@ test("the sample study is a nested bracket of the public-domain verse", () => {
   assert.equal(study.translation, "paste");
   assert.equal(study.nodes.length, 1);
   assert.equal(study.nodes[0].relation, "action-result");
-  assert.equal(study.nodes[0].dominant, 0);
+  assert.equal(study.nodes[0].dominant, 1);
   const purpose = study.nodes[0].children[1];
   assert.equal(purpose.relation, "action-purpose");
+  assert.equal(purpose.dominant, 1);
   assert.equal(purpose.children[1].relation, "negative-positive");
   assert.equal(purpose.children[1].dominant, 1);
   assert.match(propTexts(study).join(" "), /only begotten Son/);
